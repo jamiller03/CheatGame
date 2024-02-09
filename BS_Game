@@ -1,0 +1,248 @@
+# Function to initialize the game
+initialize_game = function() {
+  # Create a deck with exactly 4 of each rank
+  ranks = rep(c(1:13), times = 4)
+  deck = paste(ranks)
+  
+  # Shuffle the deck
+  deck = sample(deck)
+  return(deck) # Return the shuffled deck
+}
+
+# Function to Distribute the Card evenly between n number of players 
+distribute_deck = function(deck, num_players) {
+  hands = vector('list', length = num_players)
+  
+  # Initialize hands
+  for (i in 1:num_players) {
+    hands[[i]] = character(0)
+  }
+  
+  # Distribute cards evenly among players
+  for (i in 1:length(deck)) {
+    player_index = (i - 1) %% num_players + 1
+    hands[[player_index]] = c(hands[[player_index]], deck[i])
+  }
+  
+  # Change the hand from being character to numeric values in order to sort by numbers and not characters 
+  hands = lapply(hands, function(hand) sort(as.numeric(hand)))
+  
+  return(hands)
+}
+
+# Function for a risk-averse player when putting down a card
+# Is always honest if can be
+risk_averse_strategy = function(hand, card_to_put_down) {
+  # Check if the player has the card they are supposed to put down
+  if (card_to_put_down %in% as.character(unique(hand)) && sum(hand == card_to_put_down) > 0) {
+    # Play honestly
+    return(rep(card_to_put_down, times = sum(hand == card_to_put_down)))
+  } else {
+    # Lie and put down the card they have the most of
+    most_common_cards = as.character(names(which(table(hand) == max(table(hand)))))
+    return(rep(sample(most_common_cards, size = 1), times = 1))
+  }
+}
+
+# Function for a risk-seeker player when putting down a card
+# Is normally dishonest
+risk_seeking_strategy = function(hand, card_to_put_down) {
+  # Check if the player has more than two of the card they are supposed to put down
+  if (card_to_put_down %in% as.character(unique(hand)) && sum(hand == card_to_put_down) > 0 && sum(hand == card_to_put_down) >= 3) {
+    # Play honestly
+    return(rep(card_to_put_down, times = sum(hand == card_to_put_down)))
+    # Check if the player has the card they are supposed to put down
+  } else if (card_to_put_down %in% as.character(unique(hand)) && sum(hand == card_to_put_down) > 0) {
+    # Lie by putting down all cards they are supposed to put down plus 1 additional card
+    additional_card = as.character(names(which.max(table(hand))))
+    
+    # Check to see if the additonal card that was chosen is also the card that was already supposed to be put down
+    if (additional_card == card_to_put_down) {
+      # Choose the next best additional card to satisfy the requirements
+      remaining_cards = setdiff(unique(hand), card_to_put_down)
+      additional_card = remaining_cards[which.max(table(remaining_cards))]
+    }
+    
+    return(c(rep(card_to_put_down, times = sum(hand == card_to_put_down)), additional_card))
+  } else {
+    # Lie and put down one card of the card they have the most of
+    most_common_cards = as.character(names(which.max(table(hand))))
+    return(rep(sample(most_common_cards, size = 1), times = 1))
+  }
+}
+
+# Function to determine when a player should call BS 
+when_to_call_bs = function(hands, card_to_put_down, num_cards_put_down, current_player, num_players, pile) {
+  call = 0; # Was BS called already
+  for (i in 1:num_players) {
+    total_target_cards = sum(hands[[i]] == card_to_put_down) + num_cards_put_down
+    
+    if (total_target_cards > 4 && i != current_player) {
+      # Player decides to call "BS"
+      bs_caller = i
+      call = i; # BS is called 
+      cat("Player", bs_caller, "calls BS!\n")
+      return(bs_caller)
+    }
+  }
+  
+  # Picks a random player to call BS ensuring that BS was not already called 
+  # this round and that the current player is not the randomly chosen BS caller
+  for(i in 1:num_players) {
+    if(i != current_player && call == 0) {
+      if((length(hands[[current_player]]) <= 5 && length(pile) > 2) || (length(pile) > 10)) {
+        available = setdiff(1:num_players, current_player) # Exclude current_player
+        # Player decides to call "BS"
+        bs_caller = sample(available, 1) # Random Player excluding current player
+        cat("Player", bs_caller, "calls BS!\n")
+        return(bs_caller)
+      }
+    }
+  }
+  
+  # No player called "BS"
+  return(NULL)
+}
+
+# Function to handle "BS" calls
+handle_bs_call = function(hands, pile, card_to_put_down, num_cards_put_down, current_player, num_players) {
+  bs_caller = when_to_call_bs(hands, card_to_put_down, num_cards_put_down, current_player, num_players, pile)
+  
+  # Player called BS, handle the BS call
+  if (!is.null(bs_caller)) {
+    cat("\nPlayer", bs_caller, "calls BS!\n")
+    
+    # Check if the pile is not empty
+    if (length(pile) > 0) {
+      claimed_rank = card_to_put_down 
+      # When cards are added to the pile, 
+      # it first add the truthful cards (if there are any), 
+      # then it adds the false cards (if there are any) to the end of the game pile
+      actual_rank = as.numeric(pile[[length(pile)]]$rank)
+      
+      # Check if the claim is true
+      if (actual_rank == claimed_rank) {
+        cat("BS called incorrectly! Player", bs_caller, "must pick up the pile.\n")
+        # Adds all cards in the game pile to the bs_caller's hand
+        hands[[bs_caller]] = c(hands[[bs_caller]], unlist(sapply(pile, function(card) card$rank)))
+        cat("Player", bs_caller, "new hand:", hands[[bs_caller]], "\n")
+        
+        # Removes all cards from the game pile
+        pile = list()
+        
+      } else {
+        cat("BS called correctly! Player", current_player, "must pick up the pile.\n")
+        # Adds all cards in the game pile to the current_players's hand
+        hands[[current_player]] = c(hands[[current_player]], unlist(sapply(pile, function(card) card$rank)))
+        cat("Player", current_player, "new hand:", hands[[current_player]], "\n")
+        
+        # Removes all cards from the game pile
+        pile = list()
+      }
+      
+      # Resort the list 
+      hands[[bs_caller]] = sort(as.numeric(unlist(hands[[bs_caller]])))
+      hands[[current_player]] = sort(as.numeric(unlist(hands[[current_player]])))
+      
+    } else {
+      cat("BS called on an empty pile! No action taken.\n")
+    }
+  }
+  
+  return(list(hands = hands, pile = pile))
+}
+
+
+
+#Function to determine when the game is over
+game_over = function(hands) {
+  # Check if any player has emptied their hand
+  winner = which(sapply(hands, function(hand) length(hand) == 0))
+  
+  if (length(winner) > 0) {
+    cat("\nPlayer", winner, "wins!\n")
+    return(TRUE)
+  }
+  return(FALSE)
+}
+
+# Function to play the game BS
+play_BS = function(num_players, risk_preferences) {
+  current_rank = 1; # Game starts at rank 1
+  deck = initialize_game()
+  hands = distribute_deck(deck, num_players)
+  current_player = 1 # Game starts at player 1
+  pile = list() # Game starts with an empty gmae pile
+  
+  # Continues the steps in the loop until a player wins the game 
+  while(!game_over(hands)) {
+    #Print Current State of the Game
+    cat("\n --- \n")
+    for(i in 1:num_players) {
+      cat("Player", i, "hand:", hands[[i]], "\n")
+    }
+    cat("Game Pile:", sapply(pile, function(card) card$rank), "\n")
+
+    cat("\nPlayer", current_player, "'s turn! Put down a", current_rank, "\n")
+    
+    # The card the current player should put down
+    card_to_put_down = current_rank
+    
+    # Choose strategy based on risk preference
+    if (risk_preferences[current_player] == "risk_averse") {
+      move = risk_averse_strategy(hands[[current_player]], card_to_put_down) # Determines what cards the player is putting down
+      num_cards_put_down = length(move) # Calculates the number of cards a player puts down
+    } else {
+      move = risk_seeking_strategy(hands[[current_player]], card_to_put_down) # Determines what cards the player is putting down
+      num_cards_put_down = length(move) # Calculates the number of card a player puts down
+    }
+    
+    cat("\nPlayer", current_player, "puts down cards:", move, "\n\n")
+    
+    #Removes the cards from the player's hand that the player puts down
+    if (all(move %in% hands[[current_player]])) {
+      # Go through each card in the move
+      for (card_to_remove in unique(move)) {
+        #If the card being looked at is not the card that was suppose to be removed, only remove one of that card from the pile
+        if (card_to_remove != card_to_put_down) {
+          hands[[current_player]] = hands[[current_player]][-which(hands[[current_player]] == card_to_remove)[1]]
+          #If the card is the one to put down remove all of the cards in the pile
+        } else {
+          hands[[current_player]] = hands[[current_player]][hands[[current_player]] != card_to_remove]
+        }
+      }
+    }
+    
+    # Adds the cards that the player put down to the game pile
+    move_cards = lapply(move, function(rank) list(rank = as.character(rank), player = current_player))
+    pile = c(pile, move_cards)
+    
+    # Handles the BS call
+    result = handle_bs_call(hands, pile, as.character(current_rank), num_cards_put_down, current_player, num_players)
+    
+    # Updates each player's hand and game pile as needed
+    hands = result$hands
+    pile = result$pile
+    
+    # Move to next player
+    if (current_player == num_players) {
+      current_player = 1
+    } else {
+      current_player = current_player + 1
+    }
+    
+    # Increment the card rank
+    if (current_rank == 13) {
+      current_rank = 1
+    } else {
+      current_rank = current_rank + 1
+    }
+    
+  }
+  
+  # return(list(hands = hands, pile = pile, winner = which(sapply(hands, function(hand) length(hand) == 0))))
+}
+
+num_players = 4
+risk_preferences = c("risk_averse", "risk_seeking", "risk_averse", "risk_seeking")
+play_BS(num_players, risk_preferences)
